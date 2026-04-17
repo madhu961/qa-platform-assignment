@@ -5,11 +5,19 @@ def build_spark_session(app_name: str, warehouse: str) -> SparkSession:
     spark = (
         SparkSession.builder
         .appName(app_name)
-        .config("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.glue_catalog.warehouse", warehouse)
-        .config("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog")
-        .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config(
+            "spark.jars.packages",
+            ",".join([
+                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2",
+                "org.apache.iceberg:iceberg-aws-bundle:1.5.2",
+            ])
+        )
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+        .config("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.glue_catalog.type", "glue")
+        .config("spark.sql.catalog.glue_catalog.warehouse", warehouse)
+        .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        .config("spark.sql.defaultCatalog", "glue_catalog")
         .getOrCreate()
     )
     return spark

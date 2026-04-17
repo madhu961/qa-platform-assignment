@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 
+# Build path to the .env file in the home directory
+env_path = Path.home() / '.env'
+
+# Load the file
+load_dotenv(dotenv_path=env_path)
 
 @dataclass
 class AppConfig:

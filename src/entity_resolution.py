@@ -25,17 +25,23 @@ def _fuzzy_score_udf():
 
 def prepare_source1(df: DataFrame) -> DataFrame:
     return (
-        df.withColumn("clean_name", _name_clean_udf()(F.col("corporate_name_s1")))
-          .withColumn("clean_address", _address_clean_udf()(F.col("address")))
-          .withColumn("name_block", F.substring(F.col("clean_name"), 1, 6))
+        df.withColumnRenamed("batch_id", "batch_id_s1")
+          .withColumnRenamed("source_name", "source_name_s1")
+          .withColumnRenamed("ingestion_ts", "ingestion_ts_s1")
+          .withColumn("clean_name_s1", _name_clean_udf()(F.col("corporate_name_s1")))
+          .withColumn("clean_address_s1", _address_clean_udf()(F.col("address")))
+          .withColumn("name_block_s1", F.substring(F.col("clean_name_s1"), 1, 6))
           .withColumn("row_id_s1", F.monotonically_increasing_id())
     )
 
 
 def prepare_source2(df: DataFrame) -> DataFrame:
     return (
-        df.withColumn("clean_name", _name_clean_udf()(F.col("corporate_name_s2")))
-          .withColumn("name_block", F.substring(F.col("clean_name"), 1, 6))
+        df.withColumnRenamed("batch_id", "batch_id_s2")
+          .withColumnRenamed("source_name", "source_name_s2")
+          .withColumnRenamed("ingestion_ts", "ingestion_ts_s2")
+          .withColumn("clean_name_s2", _name_clean_udf()(F.col("corporate_name_s2")))
+          .withColumn("name_block_s2", F.substring(F.col("clean_name_s2"), 1, 6))
           .withColumn("row_id_s2", F.monotonically_increasing_id())
     )
 
@@ -47,8 +53,24 @@ def exact_match(source1_df: DataFrame, source2_df: DataFrame) -> DataFrame:
     matched = (
         s1.join(
             s2,
-            on=F.col("s1.clean_name") == F.col("s2.clean_name"),
+            on=F.col("s1.clean_name_s1") == F.col("s2.clean_name_s2"),
             how="inner"
+        )
+        .select(
+            F.col("s1.row_id_s1"),
+            F.col("s2.row_id_s2"),
+            F.col("s1.corporate_name_s1"),
+            F.col("s1.address"),
+            F.col("s1.activity_places"),
+            F.col("s1.top_suppliers"),
+            F.col("s1.batch_id_s1"),
+            F.col("s2.corporate_name_s2"),
+            F.col("s2.main_customers"),
+            F.col("s2.revenue"),
+            F.col("s2.profit"),
+            F.col("s2.batch_id_s2"),
+            F.col("s1.clean_name_s1"),
+            F.col("s2.clean_name_s2"),
         )
         .withColumn("match_type", F.lit("exact_name"))
         .withColumn("match_confidence", F.lit(100.0))
@@ -73,10 +95,10 @@ def fuzzy_match(unmatched_s1: DataFrame, unmatched_s2: DataFrame, threshold: flo
         unmatched_s1.alias("s1")
         .join(
             unmatched_s2.alias("s2"),
-            on=F.col("s1.name_block") == F.col("s2.name_block"),
+            on=F.col("s1.name_block_s1") == F.col("s2.name_block_s2"),
             how="inner"
         )
-        .withColumn("name_score", score_udf(F.col("s1.clean_name"), F.col("s2.clean_name")))
+        .withColumn("name_score", score_udf(F.col("s1.clean_name_s1"), F.col("s2.clean_name_s2")))
         .filter(F.col("name_score") >= threshold)
     )
 
@@ -132,7 +154,10 @@ def resolve_entities(source1_df: DataFrame, source2_df: DataFrame, threshold: fl
     fuzzy_matches = fuzzy_match(unmatched_s1, unmatched_s2, threshold)
 
     matched_records = build_matched_records(exact_matches, fuzzy_matches)
-
+    
+    print("exact_matches columns:", exact_matches.columns)
+    print("fuzzy_matches columns:", fuzzy_matches.columns)
+    
     s1_only = build_unmatched_source1_only(prepared_s1, matched_records)
     s2_only = build_unmatched_source2_only(prepared_s2, matched_records)
 
@@ -144,20 +169,20 @@ def resolve_entities(source1_df: DataFrame, source2_df: DataFrame, threshold: fl
         )
         .withColumn(
             "corporate_id",
-            F.sha2(F.coalesce(F.col("s1.clean_name"), F.col("s2.clean_name"), F.col("clean_name")), 256)
+            F.sha2(F.coalesce(F.col("clean_name_s1"), F.col("clean_name_s2")), 256)
         )
     )
 
     s1_only_harmonized = (
         s1_only
         .withColumn("canonical_name", F.col("corporate_name_s1"))
-        .withColumn("corporate_id", F.sha2(F.col("clean_name"), 256))
+        .withColumn("corporate_id", F.sha2(F.col("clean_name_s1"), 256))
     )
 
     s2_only_harmonized = (
         s2_only
         .withColumn("canonical_name", F.col("corporate_name_s2"))
-        .withColumn("corporate_id", F.sha2(F.col("clean_name"), 256))
+        .withColumn("corporate_id", F.sha2(F.col("clean_name_s2"), 256))
     )
 
     final_df = (

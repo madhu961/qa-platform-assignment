@@ -10,6 +10,61 @@ def build_spark_session(app_name: str, warehouse: str) -> SparkSession:
             ",".join([
                 "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2",
                 "org.apache.iceberg:iceberg-aws-bundle:1.5.2",
+                "org.apache.hadoop:hadoop-aws:3.3.4"
+            ])
+        )
+        .config("spark.sql.extensions",
+                "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+
+        .config("spark.sql.catalog.glue_catalog",
+                "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.glue_catalog.type", "glue")
+        .config("spark.sql.catalog.glue_catalog.warehouse", warehouse)
+        .config("spark.sql.catalog.glue_catalog.io-impl",
+                "org.apache.iceberg.aws.s3.S3FileIO")
+
+        .config("spark.sql.catalog.glue_catalog.client.region",
+                "ap-southeast-2")
+        .config("spark.sql.catalog.glue_catalog.s3.region",
+                "ap-southeast-2")
+
+        .config("spark.hadoop.fs.s3a.endpoint",
+                "s3.ap-southeast-2.amazonaws.com")
+
+        .config("spark.hadoop.fs.s3a.impl",
+                "org.apache.hadoop.fs.s3a.S3AFileSystem")
+
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider",
+                "com.amazonaws.auth.InstanceProfileCredentialsProvider")
+
+        .config("spark.sql.defaultCatalog", "glue_catalog")
+        .getOrCreate()
+    )
+    return spark
+
+
+def write_staging_table(
+    df: DataFrame,
+    database: str,
+    staging_table: str = "corporate_registry_staging"
+) -> None:
+    (
+        df.writeTo(f"glue_catalog.{database}.{staging_table}")
+        .using("iceberg")
+        .createOrReplace()
+    )
+
+
+def build_spark_session_old(app_name: str, warehouse: str) -> SparkSession:
+    spark = (
+        SparkSession.builder
+        .appName(app_name)
+        .config(
+            "spark.jars.packages",
+            ",".join([
+                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2",
+                "org.apache.iceberg:iceberg-aws-bundle:1.5.2",
+                "org.apache.hadoop:hadoop-aws:3.3.4",
             ])
         )
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
@@ -18,6 +73,9 @@ def build_spark_session(app_name: str, warehouse: str) -> SparkSession:
         .config("spark.sql.catalog.glue_catalog.warehouse", warehouse)
         .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
         .config("spark.sql.defaultCatalog", "glue_catalog")
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.hadoop.fs.s3n.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .getOrCreate()
     )
     return spark
@@ -40,7 +98,8 @@ def create_database_and_table(spark: SparkSession, database: str, table: str) ->
             source1_present BOOLEAN,
             source2_present BOOLEAN,
             last_updated_ts TIMESTAMP,
-            batch_id STRING
+            batch_id STRING,
+            match_type STRING
         )
         USING iceberg
     """)
@@ -50,7 +109,65 @@ def stage_temp_view(df: DataFrame, view_name: str = "staged_corporate_registry")
     df.createOrReplaceTempView(view_name)
 
 
-def merge_into_corporate_registry(spark: SparkSession, database: str, table: str, staging_view: str) -> None:
+def merge_into_corporate_registry(
+    spark: SparkSession,
+    database: str,
+    table: str,
+    staging_table: str = "corporate_registry_staging"
+) -> None:
+    spark.sql(f"""
+        MERGE INTO glue_catalog.{database}.{table} t
+        USING glue_catalog.{database}.{staging_table} s
+        ON t.corporate_id = s.corporate_id
+        WHEN MATCHED THEN UPDATE SET
+            t.canonical_name = s.canonical_name,
+            t.canonical_address = s.canonical_address,
+            t.activity_places = s.activity_places,
+            t.top_suppliers = s.top_suppliers,
+            t.main_customers = s.main_customers,
+            t.revenue = s.revenue,
+            t.profit = s.profit,
+            t.match_confidence = s.match_confidence,
+            t.source1_present = s.source1_present,
+            t.source2_present = s.source2_present,
+            t.last_updated_ts = s.last_updated_ts,
+            t.batch_id = s.batch_id,
+            t.match_type = s.match_type
+        WHEN NOT MATCHED THEN INSERT (
+            corporate_id,
+            canonical_name,
+            canonical_address,
+            activity_places,
+            top_suppliers,
+            main_customers,
+            revenue,
+            profit,
+            match_confidence,
+            source1_present,
+            source2_present,
+            last_updated_ts,
+            batch_id,
+            match_type
+        ) VALUES (
+            s.corporate_id,
+            s.canonical_name,
+            s.canonical_address,
+            s.activity_places,
+            s.top_suppliers,
+            s.main_customers,
+            s.revenue,
+            s.profit,
+            s.match_confidence,
+            s.source1_present,
+            s.source2_present,
+            s.last_updated_ts,
+            s.batch_id,
+            s.match_type
+        )
+    """)
+
+
+def merge_into_corporate_registry_old(spark: SparkSession, database: str, table: str, staging_view: str) -> None:
     spark.sql(f"""
         MERGE INTO glue_catalog.{database}.{table} t
         USING {staging_view} s

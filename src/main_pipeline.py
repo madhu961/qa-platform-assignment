@@ -7,6 +7,7 @@ from src.iceberg_ops import (
     build_spark_session,
     create_database_and_table,
     stage_temp_view,
+    write_staging_table,
     merge_into_corporate_registry,
     read_corporate_registry,
 )
@@ -37,9 +38,32 @@ def main():
 
     harmonized_df = harmonize_records(resolved_df)
 
+    harmonized_df = harmonized_df.select(
+        "corporate_id",
+        "canonical_name",
+        "canonical_address",
+        "activity_places",
+        "top_suppliers",
+        "main_customers",
+        "revenue",
+        "profit",
+        "match_confidence",
+        "source1_present",
+        "source2_present",
+        "last_updated_ts",
+        "batch_id",
+        "match_type"
+        )
+
     create_database_and_table(spark, config.database_name, config.table_name)
-    stage_temp_view(harmonized_df)
-    merge_into_corporate_registry(spark, config.database_name, config.table_name, "staged_corporate_registry")
+
+    write_staging_table(
+        harmonized_df,
+        config.database_name,
+        "corporate_registry_staging"
+    )
+    merge_into_corporate_registry(spark, config.database_name, config.table_name, "corporate_registry_staging")
+    spark.sql(f"DROP TABLE IF EXISTS glue_catalog.{config.database_name}.corporate_registry_staging")
 
     final_df = read_corporate_registry(spark, config.database_name, config.table_name)
 
@@ -70,6 +94,12 @@ def main():
     )
 
     log_event(logger, "pipeline_complete", {"batch_id": config.batch_id})
+    print("=" * 80)
+    print("PIPELINE SUCCESS")
+    print("Input Rows:", source1_rows + source2_rows)
+    print("Final Registry Rows:", final_rows)
+    print("Duplicates Removed:", source1_rows + source2_rows - final_rows)
+    print("=" * 80)
     spark.stop()
 
 

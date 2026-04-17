@@ -1,8 +1,10 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
+from datetime import datetime
 
 
 def harmonize_records(resolved_df: DataFrame) -> DataFrame:
+    run_ts = datetime.utcnow()
     return (
         resolved_df
         .withColumn(
@@ -29,6 +31,7 @@ def harmonize_records(resolved_df: DataFrame) -> DataFrame:
             "profit_final",
             F.coalesce(F.col("profit").cast("double"), F.lit(0.0))
         )
+        .withColumn("last_updated_ts", F.lit(run_ts))
         .select(
             "corporate_id",
             F.col("canonical_name"),
@@ -41,8 +44,8 @@ def harmonize_records(resolved_df: DataFrame) -> DataFrame:
             "match_confidence",
             F.col("corporate_name_s1").isNotNull().alias("source1_present"),
             F.col("corporate_name_s2").isNotNull().alias("source2_present"),
-            F.current_timestamp().alias("last_updated_ts"),
-            F.coalesce(F.col("batch_id"), F.lit("unknown")).alias("batch_id"),
+            F.col("last_updated_ts"),
+            F.coalesce(F.col("batch_id_s1"), F.col("batch_id_s2"), F.lit("unknown")).alias("batch_id"),
             F.col("match_type")
         )
     )

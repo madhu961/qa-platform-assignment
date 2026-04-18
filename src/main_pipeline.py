@@ -71,8 +71,12 @@ def main():
     source2_rows = source2_df.count()
     harmonized_rows = harmonized_df.count()
     final_rows = final_df.count()
-
-    recon = build_reconciliation_report(source1_rows, source2_rows, harmonized_rows, final_rows)
+    exact_matches = final_df.filter(final_df.match_type == "exact_name").count()
+    fuzzy_matches = final_df.filter(final_df.match_type == "fuzzy_name").count()
+    source1_only = final_df.filter(final_df.match_type == "source1_only").count()
+    source2_only = final_df.filter(final_df.match_type == "source2_only").count()
+    recon = build_reconciliation_report(source1_rows, source2_rows, final_rows, exact_matches, fuzzy_matches, source1_only, source2_only)
+    log_event(logger, "harmonized_counts", {"harmonized_rows": harmonized_rows})
     log_event(logger, "reconciliation", recon)
 
     current_match_rate = round(harmonized_rows / max(source1_rows + source2_rows, 1), 4)
@@ -96,9 +100,7 @@ def main():
     log_event(logger, "pipeline_complete", {"batch_id": config.batch_id})
     print("=" * 80)
     print("PIPELINE SUCCESS")
-    print("Input Rows:", source1_rows + source2_rows)
-    print("Final Registry Rows:", final_rows)
-    print("Duplicates Removed:", source1_rows + source2_rows - final_rows)
+    print("Reconciliation:", recon)
     print("=" * 80)
     spark.stop()
 

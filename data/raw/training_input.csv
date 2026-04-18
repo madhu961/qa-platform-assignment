@@ -1,0 +1,5 @@
+company_id,revenue,profit,top_suppliers,main_customers,activity_places
+1,10000,1500,"sup1|sup2","cust1|cust2|cust3","hyd|blr"
+2,4000,200,"sup1","cust1","hyd"
+3,8000,2500,"sup1|sup2|sup3","cust1|cust2","hyd|blr|mum"
+4,1500,-50,"","cust1","blr"
